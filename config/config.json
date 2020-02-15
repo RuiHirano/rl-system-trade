@@ -1,0 +1,14 @@
+{
+    "demo": {
+        "account_id": "101-009-9476280-001",
+        "api_key": "22bf11a2bfda49e14384e73420132633-63709b40b5997da9ae1256389eb2c932"
+    },
+    "real": {
+        "account_id": "3313854",
+        "api_key": "042961656772dc9d930f39615fcdab2f-3edd21d7c259c03e883251827dfb5b23"
+    },
+    "line": {
+        "line_notify_token": "glHYGyHqrEe9QWTgVzGuavCUhnKVtWQXOBj0M5YEEiz",
+        "line_notyfy_api": "https://notify-api.line.me/api/notify"
+    }
+}
