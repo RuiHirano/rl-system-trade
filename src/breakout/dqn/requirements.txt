@@ -1,0 +1,6 @@
+gym[atari]
+matplotlib
+pandas
+sklearn
+tensorboard==1.14.0
+opencv-python
