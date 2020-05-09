@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: dqn-breakout
+  labels:
+    app: dqn-breakout
+spec:
+  containers:
+  - name: dqn-breakout
+    image: dqn/breakout:latest
+    imagePullPolicy: Never
+    stdin: true
+    tty: true
+    volumeMounts:
+    - name: claim-volume
+        mountPath: /data
+  volumes:
+  - name: claim-volume
+  persistentVolumeClaim:
+    claimName: pv-file-storage-claim
+  terminationGracePeriodSeconds: 0
