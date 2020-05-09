@@ -199,6 +199,7 @@ class FrameStack(gym.Wrapper):
 
     def reset(self):
         ob = self.env.reset()
+        # 初回のみ同じobsを格納する
         for _ in range(self.k):
             self.frames.append(ob)
         return self._get_ob()

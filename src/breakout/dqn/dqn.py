@@ -98,27 +98,7 @@ class Agent:
         '''モデルを読み込む'''
         self.brain.read_model(name)
 
-#################################
-#####      Environment     ######
-#################################
 
-def wrap_breakout_env(env, episode_life=True, clip_rewards=True, frame_stack=False, scale=False):
-    """Configure environment for DeepMind-style Atari.
-    """
-    env = NoopResetEnv(env, noop_max=30)
-    env = MaxAndSkipEnv(env, skip=4)
-    if episode_life:
-        env = EpisodicLifeEnv(env)
-    if 'FIRE' in env.unwrapped.get_action_meanings():
-        env = FireResetEnv(env)
-    env = WarpFrame(env)
-    if scale:
-        env = ScaledFloatFrame(env)
-    if clip_rewards:
-        env = ClipRewardEnv(env)
-    if frame_stack:
-        env = FrameStack(env, 4)
-    return env
 
 
 #################################
@@ -181,6 +161,7 @@ class Trainer():
                     ''' 終了時に結果をプロット '''
                     self.episode_durations.append(t + 1)
                     self.writer.add_scalar("step", t+1, episode_i)
+                    print("step: {}".format(t+1))
                     #self.plot_durations()
                     #self.episode += 1
                     break
@@ -237,11 +218,12 @@ class Examiner():
                 time.sleep(0.05)
                 env.render()
                 ''' 行動を決定する '''
-                action = self.agent.select_action(state)
+                action = self.agent.predict_action(state)
 
                 ''' 行動に対する環境や報酬を取得する '''
-                _, _, done, _ = self.env.step(action)  # state [0,0,0,0...window_size], reward 1.0, done False, input: action 0 or 1 or 2
+                next_state, _, done, _ = self.env.step(action)  # state [0,0,0,0...window_size], reward 1.0, done False, input: action 0 or 1 or 2
 
+                state = next_state
                 if done:
                     ''' 終了時に結果をプロット '''
                     self.episode_durations.append(t + 1)
@@ -316,16 +298,13 @@ class Brain:
         
         # 経験を保存するメモリオブジェクトを生成
         self.memory = ReplayMemory(self.CAPACITY)
-        
-        self.num_actions = num_actions
-        #print(self.num_observ)
         self.num_actions = num_actions # 行動の数を取得
         self.policy_net = DQN(self.num_actions, stack_size).to(device)
         self.target_net = DQN(self.num_actions, stack_size).to(device)
         self.target_net.load_state_dict(self.policy_net.state_dict())
         self.target_net.eval()
         # 最適化手法の設定
-        self.optimizer = optim.RMSprop(self.policy_net.parameters())
+        self.optimizer = optim.RMSprop(self.policy_net.parameters(), lr=7e-4, eps=1e-5)
         
     def optimize(self):
         if len(self.memory) < self.BATCH_SIZE:
@@ -395,10 +374,13 @@ class Brain:
         expected_state_action_values = ((next_state_values * self.GAMMA) + reward_batch).unsqueeze(1) # size(32, 1)
         #print("expected_state_value: ", expected_state_action_values, expected_state_action_values.size())
 
+        #print("state_action_values", state_action_values, state_action_values.size())
         ''' Loss を計算'''
         # Compute Huber loss
+        # FIX: lossが以上に高い state_action_batchが高すぎるため,1回目の更新で大きく変えすぎ？
         loss = F.smooth_l1_loss(state_action_values, expected_state_action_values)
 
+        #print("loss", loss)
         ''' 勾配計算、更新 '''
         # Optimize the model
         self.optimizer.zero_grad()
@@ -433,7 +415,7 @@ class Brain:
         torch.save(self.policy_net.state_dict(), "{}/{}".format(dir_path, name))
         
     def read_model(self, name):
-        param = torch.load(name)
+        param = torch.load(name, map_location='cpu')
         self.policy_net.load_state_dict(param)
     
     def predict(self, state):
@@ -442,6 +424,29 @@ class Brain:
         with torch.no_grad():
             action = np.argmax(self.policy_net(state).tolist())
         return action
+
+
+#################################
+#####      Environment     ######
+#################################
+
+def wrap_breakout_env(env, episode_life=True, clip_rewards=True, frame_stack=False, scale=False):
+    """Configure environment for DeepMind-style Atari.
+    """
+    env = NoopResetEnv(env, noop_max=30)
+    env = MaxAndSkipEnv(env, skip=4)
+    if episode_life:
+        env = EpisodicLifeEnv(env)
+    if 'FIRE' in env.unwrapped.get_action_meanings():
+        env = FireResetEnv(env)
+    env = WarpFrame(env)
+    if scale:
+        env = ScaledFloatFrame(env)
+    if clip_rewards:
+        env = ClipRewardEnv(env)
+    if frame_stack:
+        env = FrameStack(env, 4)
+    return env
 
 #################################
 #####         Main         ######
@@ -496,8 +501,8 @@ if __name__ == "__main__":
     elif action == "2": # Evaluete
         print("start evaluating...")
         ''' Examiner '''
-        model_name = "dqn_breakout2_500.pth"
-        agent.remember(model_name)
+        model_name = "dqn_breakout3_100000.pth"
+        agent.remember("./result/dqn-1/weights/"+model_name)
         breakout_examiner = Examiner(env, agent)
         breakout_examiner.evaluate(600)
 
