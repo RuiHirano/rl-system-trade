@@ -26,6 +26,7 @@ from torch.utils.tensorboard import SummaryWriter
 import time
 import yaml
 from common.atari_wrappers import NoopResetEnv, MaxAndSkipEnv, EpisodicLifeEnv, FireResetEnv, WarpFrame, ScaledFloatFrame, ClipRewardEnv, FrameStack, WrapPyTorch
+from common.util import get_optimizer
 
 # if gpu is to be used
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -101,27 +102,72 @@ class Agent:
 
 
 
+
+#################################
+#####        Examiner      ######
+#################################
+
+class EvalParameter(NamedTuple):
+    save_path: str
+    weights_name: str
+    episode_num: int
+
+class Examiner():
+    def __init__(self, env, agent, param):
+        self.env = env
+        self.agent = agent
+        self.param = param
+        self.writer = SummaryWriter(log_dir="{}/logs".format(param.save_path))
+        
+    def evaluate(self):
+        for episode_i in tqdm(range(self.param.episode_num)):
+            state = self.env.reset()
+            for t in count():
+                time.sleep(0.05)
+                self.env.render()
+                ''' 行動を決定する '''
+                action = self.agent.predict_action(state)
+
+                ''' 行動に対する環境や報酬を取得する '''
+                next_state, _, done, _ = self.env.step(action)  # state [0,0,0,0...window_size], reward 1.0, done False, input: action 0 or 1 or 2
+
+                state = next_state
+                if done:
+                    ''' 終了時に結果をプロット '''
+                    self.writer.add_scalar("step-eval", t+1, episode_i)
+                    break
+
+
+        ''' 終了 '''
+        print('Complete')
+        self.writer.close()
+
+
 #################################
 #####        Trainer       ######
 #################################
 
+class TrainParameter(NamedTuple):
+    save_path: str
+    save_name: str
+    target_update_iter: int
+    episode_num: int
+    record_iter: int
+
 class Trainer():
-    def __init__(self, env, agent, train_param):
+    def __init__(self, env, agent, param):
         self.env = env
         self.agent = agent
-        self.loss_durations = []
-        self.episode_durations = []
-        self.TARGET_UPDATE = 10
-        self.episode = 0
-        self.writer = SummaryWriter(log_dir="./result/{}/logs".format(train_param["log_dir"]))
+        self.param = param
+        self.writer = SummaryWriter(log_dir="{}/logs".format(param.save_path))
         
-    def train(self, episode_num, save_name, train_param):
-        for episode_i in tqdm(range(episode_num)):
-            #print("episode: ", episode_i)
-            state = env.reset()
+    def train(self):
+        for episode_i in tqdm(range(self.param.episode_num)):
+            state = self.env.reset()
+            score = 0
 
             for t in count():
-                #env.render()
+                self.env.render()
 
                 ''' 行動を決定する '''
                 action = self.agent.select_action(state)
@@ -129,6 +175,8 @@ class Trainer():
                 ''' 行動に対する環境や報酬を取得する '''
                 next_state, reward, done, info = self.env.step(action)  # state [0,0,0,0...window_size], reward 1.0, done False, input: action 0 or 1 or 2
 
+                if reward > 0:
+                    score += reward
                 ''' 終了時はnext_state_valueをNoneとする '''
 
                 if done:
@@ -154,105 +202,40 @@ class Trainer():
                 ''' エージェントに学習させる '''
                 loss = self.agent.learn()
                 if loss != None:
-                    self.loss_durations.append(loss)
                     self.writer.add_scalar("loss", loss, episode_i)
 
                 if done:
                     ''' 終了時に結果をプロット '''
-                    self.episode_durations.append(t + 1)
                     self.writer.add_scalar("step", t+1, episode_i)
-                    print("step: {}".format(t+1))
-                    #self.plot_durations()
-                    #self.episode += 1
+                    self.writer.add_scalar("score", score, episode_i)
+                    print("step: {}, score: {}, loss: {}".format(t+1, score, loss))
                     break
 
             # Update the target network, copying all weights and biases in DQN
-            if episode_i % self.TARGET_UPDATE == 0:
+            if episode_i % self.param.target_update_iter == 0:
                 ''' 目標を修正する '''
                 self.agent.modify_goal()
 
-            if episode_i % 1000 == 0 and episode_i != 0:
+            if episode_i % self.param.record_iter == 0 and episode_i != 0:
                 ''' 途中経過を保存 '''
-                #self.agent.record(save_name+"_"+str(episode_i)+".pth")
-                self.agent.record('{}_{}.pth'.format(save_name, episode_i), './result/{}/weights'.format(train_param["log_dir"]))
+                self.agent.record('{}_{}'.format(self.param.save_name, episode_i), '{}/weights'.format(self.param.save_path))
 
         ''' モデルを保存する '''
         # モデルの保存
-        self.agent.record('{}_{}.pth'.format(save_name, episode_num), './result/{}/weights'.format(train_param["log_dir"]))
-        #self.agent.record(save_name+"_"+str(episode_num)+".pth")
+        self.agent.record('{}_{}.pth'.format(self.param.save_name, self.param.episode_num), '{}/weights'.format(self.param.save_path))
 
         print('Complete')
         self.writer.close()
-        #self.plot_durations()
         
-        
-    def plot_durations(self):
-        fig = plt.figure()
-        ax = fig.add_subplot(2, 1, 1)
-        ax2 = fig.add_subplot(2, 1, 2)
-        x = [s for s in range(len(self.loss_durations))]
-        y = self.loss_durations
-        x2 = [s for s in range(len(self.episode_durations))]
-        y2 = self.episode_durations
-        ax.plot(x, y, color="red", label="loss")
-        ax2.plot(x2, y2, color="blue", label="episode")
-        ax.legend(loc = 'upper right') #凡例
-        ax2.legend(loc = 'upper right') #凡例
-        fig.tight_layout()              #レイアウトの設定
-        plt.show()
-
-#################################
-#####        Examiner      ######
-#################################
-
-class Examiner():
-    def __init__(self, env, agent):
-        self.env = env
-        self.agent = agent
-        self.episode_durations = []
-        
-    def evaluate(self, episode_num):
-        for episode_i in tqdm(range(episode_num)):
-            state = env.reset()
-            for t in count():
-                time.sleep(0.05)
-                env.render()
-                ''' 行動を決定する '''
-                action = self.agent.predict_action(state)
-
-                ''' 行動に対する環境や報酬を取得する '''
-                next_state, _, done, _ = self.env.step(action)  # state [0,0,0,0...window_size], reward 1.0, done False, input: action 0 or 1 or 2
-
-                state = next_state
-                if done:
-                    ''' 終了時に結果をプロット '''
-                    self.episode_durations.append(t + 1)
-                    break
-
-
-        ''' 終了 '''
-        print('Complete')
-        self.plot_durations()
-        
-        
-    def plot_durations(self):
-        fig = plt.figure()
-        ax2 = fig.add_subplot(2, 1, 2)
-        x2 = [s for s in range(len(self.episode_durations))]
-        y2 = self.episode_durations
-        ax2.plot(x2, y2, color="blue", label="episode")
-        ax2.legend(loc = 'upper right') #凡例
-        fig.tight_layout()              #レイアウトの設定
-        plt.show()
 
 #################################
 #####         Net          ######
 #################################
 class DQN(nn.Module):
-    def __init__(self, output_size: int, stack_size: int):
+    def __init__(self, output_size: int):
         super(DQN, self).__init__()
         self.feature = nn.Sequential(
-                nn.Conv2d(stack_size, 32, kernel_size=8, stride=4),
+                nn.Conv2d(4, 32, kernel_size=8, stride=4),
                 nn.ReLU(inplace=True),
                 nn.Conv2d(32, 64, kernel_size=4, stride=2),
                 nn.ReLU(inplace=True),
@@ -282,9 +265,12 @@ class BrainParameter(NamedTuple):
     eps_decay: int
     capacity: int
     hidden_size: int
+    optimizer_name: str
+    learning_rate: float
+    eps: float
 
 class Brain:
-    def __init__(self, param, num_actions, stack_size):
+    def __init__(self, param, num_actions):
         self.steps_done = 0
         
         # Brain Parameter
@@ -299,12 +285,14 @@ class Brain:
         # 経験を保存するメモリオブジェクトを生成
         self.memory = ReplayMemory(self.CAPACITY)
         self.num_actions = num_actions # 行動の数を取得
-        self.policy_net = DQN(self.num_actions, stack_size).to(device)
-        self.target_net = DQN(self.num_actions, stack_size).to(device)
+        self.policy_net = DQN(self.num_actions).to(device)
+        self.target_net = DQN(self.num_actions).to(device)
         self.target_net.load_state_dict(self.policy_net.state_dict())
         self.target_net.eval()
         # 最適化手法の設定
-        self.optimizer = optim.RMSprop(self.policy_net.parameters(), lr=7e-4, eps=1e-5)
+
+        self.optimizer = get_optimizer(param.optimizer_name, self.policy_net.parameters(), lr=param.learning_rate, eps=param.eps)
+        # self.optimizer = optim.RMSprop(self.policy_net.parameters(), lr=param., eps=1e-5)
         
     def optimize(self):
         if len(self.memory) < self.BATCH_SIZE:
@@ -468,43 +456,62 @@ def get_config():
 
 if __name__ == "__main__":
     
+    ''' config取得 '''
+    config = get_config()
+    print(config) 
     
     ''' 環境生成 '''
-    env = gym.make('BreakoutNoFrameskip-v4')
+    env = gym.make(config["env_param"]["env_name"])
     print(env.spec.id)
     # env = make_atari('Breakout-v0')
-    env = wrap_breakout_env(env, frame_stack=True, scale=False)  
+    env = wrap_breakout_env(env, frame_stack=config["env_param"]["frame_stack"], scale=config["env_param"]["scale"])  
     env = WrapPyTorch(env) # output (1, 84, 84)
     
     ''' エージェント生成 '''
     init_screen = env.reset() #(1, 84, 84)
     _, screen_height, screen_width = init_screen.shape
     num_actions = env.action_space.n
-    stack_size = 4
-    brain_param = BrainParameter(batch_size=32, gamma=0.99, eps_start=1.0, eps_end=0.1, eps_decay=200, capacity=10000, hidden_size=100)
-    brain = Brain(brain_param, num_actions, stack_size)
+    brain_param = BrainParameter(
+        batch_size=config["brain_param"]["batch_size"], 
+        gamma=config["brain_param"]["gamma"],
+        eps_start=config["brain_param"]["eps_start"],
+        eps_end=config["brain_param"]["eps_end"],
+        eps_decay=config["brain_param"]["eps_decay"],
+        capacity=config["brain_param"]["capacity"],
+        hidden_size=config["brain_param"]["hidden_size"],
+        optimizer_name=config["brain_param"]["optimizer_name"],
+        learning_rate=config["brain_param"]["learning_rate"],
+        eps=config["brain_param"]["eps"]
+    )
+    brain = Brain(brain_param, num_actions)
     agent = Agent(brain)
 
-    config = get_config()
-    print(config) 
 
-    print("Please select. 1 or 2")
-    print("1. Train")
-    print("2. Evaluate")
-    action = input()
-    if action == "1": # Train
+    action = config["type"]
+    if action == "train": # Train
         print("start training...")
         ''' Trainer '''
-        breakout_trainer = Trainer(env, agent, config["train_param"])
-        breakout_trainer.train(100000, 'dqn_breakout3', config["train_param"])
+        train_param = TrainParameter(
+            save_path=config["train_param"]["save_path"], 
+            episode_num=config["train_param"]["episode_num"],
+            record_iter=config["train_param"]["record_iter"],
+            target_update_iter=config["train_param"]["target_update_iter"],
+            save_name=config["train_param"]["save_name"]
+        )
+        breakout_trainer = Trainer(env, agent, train_param)
+        breakout_trainer.train()
 
-    elif action == "2": # Evaluete
+    elif action == "eval": # Evaluete
         print("start evaluating...")
         ''' Examiner '''
-        model_name = "dqn_breakout3_100000.pth"
-        agent.remember("./result/dqn-1/weights/"+model_name)
-        breakout_examiner = Examiner(env, agent)
-        breakout_examiner.evaluate(600)
+        eval_param = EvalParameter(
+            save_path=config["eval_param"]["save_path"], 
+            weights_name=config["eval_param"]["weights_name"],
+            episode_num=config["eval_param"]["episode_num"]
+        )
+        agent.remember("{}/weights/{}".format(eval_param.save_path, eval_param.weights_name))
+        breakout_examiner = Examiner(env, agent, eval_param)
+        breakout_examiner.evaluate()
 
     else:
         print("unknown number")
