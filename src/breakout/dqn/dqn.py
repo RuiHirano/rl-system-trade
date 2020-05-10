@@ -167,7 +167,7 @@ class Trainer():
             score = 0
 
             for t in count():
-                self.env.render()
+                #self.env.render()
 
                 ''' 行動を決定する '''
                 action = self.agent.select_action(state)
