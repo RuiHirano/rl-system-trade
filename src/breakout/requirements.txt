@@ -1,4 +1,0 @@
-gym[atari]
-matplotlib
-pandas
-sklearn
