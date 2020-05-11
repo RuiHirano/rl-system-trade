@@ -1,2 +1,3 @@
 *.csv
 /logs/
+.DS_Store

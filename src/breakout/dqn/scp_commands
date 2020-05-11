@@ -1,2 +1,5 @@
 scp -r ruirui_nis@192.168.207.236:~/workspace/rl-system-trade/src/breakout/dqn/dqn-1 ./dqn-2
 scp -r ruirui@133.6.254.20:~/dqn-2 ./
+
+tensorboard --logdir [logs へのパス]
+// localhost:6006
